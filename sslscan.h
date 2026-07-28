@@ -65,6 +65,7 @@
 #define TLSv1_1 1
 #define TLSv1_2 2
 #define TLSv1_3 3
+#define TLS_ALL_VERSIONS 0xff
 
 /* We must maintain our own list of TLSv1.3-specific ciphersuites here, because SSL_CTX_get_ciphers() will *always* return TLSv1.2 ciphersuites, even when SSL_CTX_set_min_proto_version() and SSL_CTX_set_max_proto_version() are used.  This is confirmed by an OpenSSL developer here: https://github.com/openssl/openssl/issues/7196#issuecomment-420575202 */
 #define TLSV13_CIPHERSUITES "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_CCM_SHA256:TLS_AES_128_CCM_8_SHA256"
@@ -138,7 +139,7 @@ struct sslCipher
     const char *version;
     int bits;
     char description[512];
-    const SSL_METHOD *sslMethod;
+    unsigned intsslMethod;
     struct sslCipher *next;
 };
 
@@ -312,7 +313,7 @@ void bs_set_ushort(bs *b, size_t offset, unsigned short length);
 int bs_read_socket(bs *b, int s, size_t num_bytes);
 unsigned int checkIfTLSVersionIsSupported(struct sslCheckOptions *options, unsigned int tls_version);
 unsigned int checkIfTLSVersionIsSupported_Backup(struct sslCheckOptions *options, unsigned int tls_version);
-SSL_CTX *CTX_new(const SSL_METHOD *method);
+SSL_CTX *CTX_new(unsigned intmethod);
 int fileExists(char *);
 void findMissingCiphers();
 char *getPrintableTLSName(unsigned int tls_version);
@@ -329,7 +330,7 @@ void readLine(FILE *, char *, int);
 int readOrLogAndClose(int, void *, size_t, const struct sslCheckOptions *);
 char *resolveCipherID(unsigned short cipher_id, int *cipher_bits);
 static int password_callback(char *, int, int, void *);
-const char *printableSslMethod(const SSL_METHOD *);
+const char *printableSslMethod(unsigned int);
 ssize_t sendString(int, const char[]);
 int ssl_print_tmp_key(struct sslCheckOptions *, SSL *s);
 void tlsExtensionAddDefaultKeyShare(bs *tls_extensions);
@@ -344,22 +345,22 @@ int outputRenegotiation(struct sslCheckOptions *, struct renegotiationOutput *);
 struct renegotiationOutput *newRenegotiationOutput(void);
 int freeRenegotiationOutput(struct renegotiationOutput *);
 
-int testCompression(struct sslCheckOptions *, const SSL_METHOD *);
-int testRenegotiation(struct sslCheckOptions *, const SSL_METHOD *);
+int testCompression(struct sslCheckOptions *, unsigned int);
+int testRenegotiation(struct sslCheckOptions *, unsigned int);
 #ifdef SSL_MODE_SEND_FALLBACK_SCSV
-int testfallback(struct sslCheckOptions *, const SSL_METHOD *);
+int testfallback(struct sslCheckOptions *, unsigned int);
 #endif
-int testHeartbleed(struct sslCheckOptions *, const SSL_METHOD *);
+int testHeartbleed(struct sslCheckOptions *, unsigned int);
 int testSupportedGroups(struct sslCheckOptions *options);
 int testSignatureAlgorithms(struct sslCheckOptions *options);
-int testCipher(struct sslCheckOptions *, const SSL_METHOD *);
-int testMissingCiphers(struct sslCheckOptions *options, unsigned int version);
-int testProtocolCiphers(struct sslCheckOptions *, const SSL_METHOD *);
+int testCipher(struct sslCheckOptions *, unsigned int);
+int testMissingCiphers(struct sslCheckOptions *options, unsigned int);
+int testProtocolCiphers(struct sslCheckOptions *options, unsigned int);
 int testConnection(struct sslCheckOptions *);
 int testHost(struct sslCheckOptions *);
 int loadCerts(struct sslCheckOptions *);
-int checkCertificateProtocols(struct sslCheckOptions *, const SSL_METHOD *);
-int checkCertificate(struct sslCheckOptions *, const SSL_METHOD *);
+int checkCertificateProtocols(struct sslCheckOptions *, unsigned int);
+int checkCertificate(struct sslCheckOptions *, unsigned int);
 int showCertificate(struct sslCheckOptions *);
 
 int runSSLv2Test(struct sslCheckOptions *options);

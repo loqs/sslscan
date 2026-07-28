@@ -163,6 +163,37 @@ SSL_CTX *new_CTX(const SSL_METHOD *method) {
   return ret;
 }
 
+/* Creates a new SSL_CTX for the given TLS version, using TLS_method() with min/max set. */
+SSL_CTX *new_versioned_CTX(unsigned int tls_version) {
+  SSL_CTX *ret = SSL_CTX_new(TLS_method());
+  if (ret == NULL)
+    return NULL;
+  switch (tls_version) {
+    case TLSv1_0:
+      SSL_CTX_set_min_proto_version(ret, TLS1_VERSION);
+      SSL_CTX_set_max_proto_version(ret, TLS1_VERSION);
+      break;
+    case TLSv1_1:
+      SSL_CTX_set_min_proto_version(ret, TLS1_1_VERSION);
+      SSL_CTX_set_max_proto_version(ret, TLS1_1_VERSION);
+      break;
+    case TLSv1_2:
+      SSL_CTX_set_min_proto_version(ret, TLS1_2_VERSION);
+      SSL_CTX_set_max_proto_version(ret, TLS1_2_VERSION);
+      break;
+    case TLSv1_3:
+      SSL_CTX_set_min_proto_version(ret, TLS1_3_VERSION);
+      SSL_CTX_set_max_proto_version(ret, TLS1_3_VERSION);
+      break;
+    case TLS_ALL_VERSIONS:
+      break;
+  }
+  SSL_CTX_set_security_level(ret, 0);
+  SSL_CTX_set_security_callback(ret, security_callback_allow_all);
+  SSL_CTX_set_quiet_shutdown(ret, 1);
+  return ret;
+}
+
 /* Creates an SSL object using SSL_new(), sets the security level to 0, and sets the permissive security callback on it.  Free with FREE_SSL(). */
 SSL *new_SSL(SSL_CTX *ctx) {
   SSL *ret = SSL_new(ctx);
@@ -172,7 +203,7 @@ SSL *new_SSL(SSL_CTX *ctx) {
 }
 
 // Adds Ciphers to the Cipher List structure
-int populateCipherList(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int populateCipherList(struct sslCheckOptions *options, unsigned int tls_version)
 {
     int returnCode = true;
     struct sslCipher *sslCipherPointer;
@@ -181,7 +212,7 @@ int populateCipherList(struct sslCheckOptions *options, const SSL_METHOD *sslMet
     // STACK_OF is a sign that you should be using C++ :)
     STACK_OF(SSL_CIPHER) *cipherList;
     SSL *ssl = NULL;
-    options->ctx = new_CTX(sslMethod);
+    options->ctx = new_versioned_CTX(tls_version);
     if (options->ctx == NULL) {
         printf_error("Could not create CTX object.");
         return false;
@@ -213,7 +244,6 @@ int populateCipherList(struct sslCheckOptions *options, const SSL_METHOD *sslMet
         // Init
         memset(sslCipherPointer, 0, sizeof(struct sslCipher));
         // Add cipher information...
-        sslCipherPointer->sslMethod = sslMethod;
         sslCipherPointer->name = SSL_CIPHER_get_name(sk_SSL_CIPHER_value(cipherList, loop));
         sslCipherPointer->version = SSL_CIPHER_get_version(sk_SSL_CIPHER_value(cipherList, loop));
         SSL_CIPHER_description(sk_SSL_CIPHER_value(cipherList, loop), sslCipherPointer->description, sizeof(sslCipherPointer->description) - 1);
@@ -901,7 +931,7 @@ int freeRenegotiationOutput( struct renegotiationOutput *myRenOut )
 }
 
 // Check if the server supports compression
-int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int testCompression(struct sslCheckOptions *options, unsigned int tls_version)
 {
     // Variables...
     int status = true;
@@ -915,7 +945,7 @@ int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod
     if (socketDescriptor != 0)
     {
         // Setup Context Object...
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
             if (SSL_CTX_set_cipher_list(options->ctx, CIPHERSUITE_LIST_ALL) != 0)
@@ -1020,7 +1050,7 @@ int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod
 }
 
 // Check for TLS_FALLBACK_SCSV
-int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
+int testFallback(struct sslCheckOptions *options,  unsigned int tls_version)
 {
     // Variables...
     int status = true;
@@ -1030,12 +1060,11 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
     int sslversion;
     SSL *ssl = NULL;
     BIO *cipherConnectionBio;
-    const SSL_METHOD *secondMethod;
+    unsigned int secondVersion;
 
     // Function gets called a second time with downgraded protocol
-    if (!sslMethod)
+    if (tls_version == TLS_ALL_VERSIONS)
     {
-        sslMethod = SSLv23_method();
         downgraded = false;
     }
 
@@ -1044,7 +1073,7 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
     if (socketDescriptor != 0)
     {
         // Setup Context Object...
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
             if (downgraded)
@@ -1092,15 +1121,15 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
                                 sslversion = SSL_version(ssl);
                                 if (sslversion == TLS1_3_VERSION)
                                 {
-                                    secondMethod = TLSv1_2_client_method();
+                                    secondVersion = TLSv1_2;
                                 }
                                 else if (sslversion == TLS1_2_VERSION)
                                 {
-				  secondMethod = TLSv1_1_client_method();
+                                  secondVersion = TLSv1_1;
                                 }
 				else if (sslversion == TLS1_VERSION)
 				{
-				  secondMethod = TLSv1_client_method();
+				  secondVersion = TLSv1_0;
 				}
 				else if (sslversion == TLS1_VERSION)
 				{
@@ -1183,14 +1212,14 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
     // Call function again with downgraded protocol
     if (status && !downgraded)
     {
-        testFallback(options, secondMethod);
+        testFallback(options, secondVersion);
     }
     return status;
 }
 
 
 // Check if the server supports renegotiation
-int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int testRenegotiation(struct sslCheckOptions *options, unsigned int tls_version)
 {
     // Variables...
     int cipherStatus;
@@ -1208,7 +1237,7 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
     {
 
         // Setup Context Object...
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
             if (SSL_CTX_set_cipher_list(options->ctx, CIPHERSUITE_LIST_ALL) != 0)
@@ -1355,21 +1384,19 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
 
 }
 
-const char* printableSslMethod(const SSL_METHOD *sslMethod)
+const char* printableSslMethod(unsigned int tls_version)
 {
-    if (sslMethod == TLSv1_client_method())
-        return "TLSv1.0";
-    if (sslMethod == TLSv1_1_client_method())
-        return "TLSv1.1";
-    if (sslMethod == TLSv1_2_client_method())
-        return "TLSv1.2";
-    if (sslMethod == TLSv1_3_client_method())
-        return "TLSv1.3";
-    return "unknown SSL_METHOD";
+    switch (tls_version) {
+        case TLSv1_0: return "TLSv1.0";
+        case TLSv1_1: return "TLSv1.1";
+        case TLSv1_2: return "TLSv1.2";
+        case TLSv1_3: return "TLSv1.3";
+        default: return "unknown SSL_METHOD";
+    }
 }
 
 // Test for Heartbleed
-int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int testHeartbleed(struct sslCheckOptions *options, unsigned int tls_version)
 {
     // Variables...
     int status = true;
@@ -1385,19 +1412,19 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
         // Credit to Jared Stafford (jspenguin@jspenguin.org)
         char hello[] = {0x16,0x03,0x01,0x00,0xdc,0x01,0x00,0x00,0xd8,0x03,0x00,0x53,0x43,0x5b,0x90,0x9d,0x9b,0x72,0x0b,0xbc,0x0c,0xbc,0x2b,0x92,0xa8,0x48,0x97,0xcf,0xbd,0x39,0x04,0xcc,0x16,0x0a,0x85,0x03,0x90,0x9f,0x77,0x04,0x33,0xd4,0xde,0x00,0x00,0x66,0xc0,0x14,0xc0,0x0a,0xc0,0x22,0xc0,0x21,0x00,0x39,0x00,0x38,0x00,0x88,0x00,0x87,0xc0,0x0f,0xc0,0x05,0x00,0x35,0x00,0x84,0xc0,0x12,0xc0,0x08,0xc0,0x1c,0xc0,0x1b,0x00,0x16,0x00,0x13,0xc0,0x0d,0xc0,0x03,0x00,0x0a,0xc0,0x13,0xc0,0x09,0xc0,0x1f,0xc0,0x1e,0x00,0x33,0x00,0x32,0x00,0x9a,0x00,0x99,0x00,0x45,0x00,0x44,0xc0,0x0e,0xc0,0x04,0x00,0x2f,0x00,0x96,0x00,0x41,0xc0,0x11,0xc0,0x07,0xc0,0x0c,0xc0,0x02,0x00,0x05,0x00,0x04,0x00,0x15,0x00,0x12,0x00,0x09,0x00,0x14,0x00,0x11,0x00,0x08,0x00,0x06,0x00,0x03,0x00,0xff,0x01,0x00,0x00,0x49,0x00,0x0b,0x00,0x04,0x03,0x00,0x01,0x02,0x00,0x0a,0x00,0x34,0x00,0x32,0x00,0x0e,0x00,0x0d,0x00,0x19,0x00,0x0b,0x00,0x0c,0x00,0x18,0x00,0x09,0x00,0x0a,0x00,0x16,0x00,0x17,0x00,0x08,0x00,0x06,0x00,0x07,0x00,0x14,0x00,0x15,0x00,0x04,0x00,0x05,0x00,0x12,0x00,0x13,0x00,0x01,0x00,0x02,0x00,0x03,0x00,0x0f,0x00,0x10,0x00,0x11,0x00,0x23,0x00,0x00,0x00,0x0f,0x00,0x01,0x01};
 
-        if (sslMethod == TLSv1_client_method())
+        if (tls_version == TLSv1_0)
         {
             hello[10] = 0x01;
         }
-        else if (sslMethod == TLSv1_1_client_method())
+        else if (tls_version == TLSv1_1)
         {
             hello[10] = 0x02;
         }
-        else if (sslMethod == TLSv1_2_client_method())
+        else if (tls_version == TLSv1_2)
         {
             hello[10] = 0x03;
         }
-        else if (sslMethod == TLSv1_3_client_method())
+        else if (tls_version == TLSv1_3)
         {
             hello[10] = 0x03;
         }
@@ -1408,19 +1435,19 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
 
         // Send the heartbeat
         char hb[8] = {0x18,0x03,0x00,0x00,0x03,0x01,0x40,0x00};
-        if (sslMethod == TLSv1_client_method())
+        if (tls_version == TLSv1_0)
         {
             hb[2] = 0x01;
         }
-        else if (sslMethod == TLSv1_1_client_method())
+        else if (tls_version == TLSv1_1)
         {
             hb[2] = 0x02;
         }
-        else if (sslMethod == TLSv1_2_client_method())
+        else if (tls_version == TLSv1_2)
         {
             hb[2] = 0x03;
         }
-        else if (sslMethod == TLSv1_3_client_method())
+        else if (tls_version == TLSv1_3)
         {
             hb[2] = 0x03;
         }
@@ -1470,13 +1497,13 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
             else if (typ == 24 && ln > 3)
             {
                 printf("%svulnerable%s to heartbleed\n", COL_RED, RESET);
-                printf_xml("  <heartbleed sslversion=\"%s\" vulnerable=\"1\" />\n", printableSslMethod(sslMethod));
+                printf_xml("  <heartbleed sslversion=\"%s\" vulnerable=\"1\" />\n", printableSslMethod(tls_version));
                 close(socketDescriptor);
                 return status;
             }
         }
         printf("%snot vulnerable%s to heartbleed\n", COL_GREEN, RESET);
-        printf_xml("  <heartbleed sslversion=\"%s\" vulnerable=\"0\" />\n", printableSslMethod(sslMethod));
+        printf_xml("  <heartbleed sslversion=\"%s\" vulnerable=\"0\" />\n", printableSslMethod(tls_version));
 
         // Disconnect from host
         close(socketDescriptor);
@@ -1574,11 +1601,11 @@ int ssl_print_tmp_key(struct sslCheckOptions *options, SSL *s)
 #endif
 }
 
-int setCipherSuite(struct sslCheckOptions *options, const SSL_METHOD *sslMethod, const char *str)
+int setCipherSuite(struct sslCheckOptions *options, unsigned int tls_version, const char *str)
 {
   if(strlen(str)>0)
   {
-    if(sslMethod==TLSv1_3_client_method())
+    if(tls_version==TLSv1_3)
     {
       return(SSL_CTX_set_ciphersuites(options->ctx,str));
     }
@@ -1782,7 +1809,7 @@ void outputCipher(struct sslCheckOptions *options, SSL *ssl, const char *cleanSs
 }
 
 // Test a cipher...
-int testCipher(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int testCipher(struct sslCheckOptions *options, unsigned int tls_version)
 {
     // Variables...
     int cipherStatus = 0;
@@ -1793,7 +1820,7 @@ int testCipher(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
     int cipherbits = -1;
     uint32_t cipherid = 0;
     const SSL_CIPHER *sslCipherPointer = NULL;
-    const char *cleanSslMethod = printableSslMethod(sslMethod);
+    const char *cleanSslMethod = printableSslMethod(tls_version);
     const char *ciphername = NULL;
     struct timeval tval_start = {0};
     unsigned int milliseconds_elapsed = 0;
@@ -1808,7 +1835,7 @@ int testCipher(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
     socketDescriptor = tcpConnect(options);
     if (socketDescriptor != 0)
     {
-        if (setCipherSuite(options, sslMethod, options->cipherstring))
+        if (setCipherSuite(options, tls_version, options->cipherstring))
         {
             // Create SSL object...
             ssl = new_SSL(options->ctx);
@@ -1866,7 +1893,7 @@ int testCipher(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
 
                 // Disconnect SSL over socket
                 const char *usedcipher = SSL_get_cipher_name(ssl);
-                if(sslMethod == TLSv1_3_client_method())
+                if(tls_version == TLSv1_3)
                   cipherRemove(options->cipherstring, usedcipher);  // Remove cipher from TLSv1.3 list
                 else {
                   // Using strcat rather than strncat to avoid a warning from GCC
@@ -1901,11 +1928,11 @@ int testCipher(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
     return status;
 }
 
-int checkCertificateProtocol(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int checkCertificateProtocol(struct sslCheckOptions *options, unsigned int tls_version)
 {
     int status = true;
-    // Setup Context Object...
-    options->ctx = new_CTX(sslMethod);
+        // Setup Context Object...
+        options->ctx = new_versioned_CTX(tls_version);
     if (options->ctx != NULL)
     {
         // SSL implementation bugs/workaround
@@ -1919,7 +1946,7 @@ int checkCertificateProtocol(struct sslCheckOptions *options, const SSL_METHOD *
             status = loadCerts(options);
 
         // Check the certificate
-        status = checkCertificate(options, sslMethod);
+        status = checkCertificate(options, tls_version);
     }
 
     // Error Creating Context Object
@@ -1932,7 +1959,7 @@ int checkCertificateProtocol(struct sslCheckOptions *options, const SSL_METHOD *
 }
 
 // Report certificate weaknesses (key length and signing algorithm)
-int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int checkCertificate(struct sslCheckOptions *options, unsigned int tls_version)
 {
     int status = true;
     int socketDescriptor = 0;
@@ -1957,7 +1984,7 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
     if (socketDescriptor != 0)
     {
         // Setup Context Object...
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
 
@@ -2378,7 +2405,7 @@ int ocspRequest(struct sslCheckOptions *options)
     BIO *cipherConnectionBio = NULL;
     BIO *stdoutBIO = NULL;
     BIO *fileBIO = NULL;
-    const SSL_METHOD *sslMethod = NULL;
+    unsigned int tls_version = TLS_ALL_VERSIONS;
 
     // Connect to host
     socketDescriptor = tcpConnect(options);
@@ -2386,26 +2413,26 @@ int ocspRequest(struct sslCheckOptions *options)
     {
         // Setup Context Object...
         if( options->sslVersion == ssl_v2 || options->sslVersion == ssl_v3) {
-            printf_verbose("sslMethod = SSLv23_method()");
-            sslMethod = SSLv23_method();
+            printf_verbose("tls_version = TLS_ALL_VERSIONS (ssl_v2/ssl_v3)");
+            tls_version = TLS_ALL_VERSIONS;
         }
         else if( options->sslVersion == tls_v11) {
-            printf_verbose("sslMethod = TLSv1_1_method()");
-            sslMethod = TLSv1_1_method();
+            printf_verbose("tls_version = TLSv1_1");
+            tls_version = TLSv1_1;
         }
         else if( options->sslVersion == tls_v12) {
-            printf_verbose("sslMethod = TLSv1_2_method()");
-            sslMethod = TLSv1_2_method();
+            printf_verbose("tls_version = TLSv1_2");
+            tls_version = TLSv1_2;
         }
         else if( options->sslVersion == tls_v13) {
-            printf_verbose("sslMethod = TLSv1_3_method()");
-            sslMethod = TLSv1_3_method();
+            printf_verbose("tls_version = TLSv1_3");
+            tls_version = TLSv1_3;
         }
         else {
-            printf_verbose("sslMethod = TLS_method()\n");
-            sslMethod = TLS_method();
+            printf_verbose("tls_version = TLS_ALL_VERSIONS\n");
+            tls_version = TLS_ALL_VERSIONS;
         }
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
 
@@ -2468,7 +2495,7 @@ int ocspRequest(struct sslCheckOptions *options)
                         else
                         {
                             printf("\n%sFailed to connect to get OCSP status.%s\n", COL_RED, RESET);
-                            printf("Most likely cause is server not supporting %s, try manually specifying version\n", printableSslMethod(sslMethod));
+                            printf("Most likely cause is server not supporting %s, try manually specifying version\n", printableSslMethod(tls_version));
                         }
                         // Free SSL object
                         FREE_SSL(ssl);
@@ -2684,7 +2711,7 @@ int showCertificate(struct sslCheckOptions *options)
     BIO *fileBIO = NULL;
     X509 *x509Cert = NULL;
     EVP_PKEY *publicKey = NULL;
-    const SSL_METHOD *sslMethod = NULL;
+    unsigned int tls_version = TLS_ALL_VERSIONS;
     const ASN1_OBJECT *asn1Object = NULL;
     X509_EXTENSION *extension = NULL;
     char buffer[1024];
@@ -2700,26 +2727,26 @@ int showCertificate(struct sslCheckOptions *options)
 
         // Setup Context Object...
         if( options->sslVersion == ssl_v2 || options->sslVersion == ssl_v3) {
-            printf_verbose("sslMethod = SSLv23_method()");
-            sslMethod = SSLv23_method();
+            printf_verbose("tls_version = TLS_ALL_VERSIONS (ssl_v2/ssl_v3)");
+            tls_version = TLS_ALL_VERSIONS;
         }
         else if( options->sslVersion == tls_v11) {
-            printf_verbose("sslMethod = TLSv1_1_method()");
-            sslMethod = TLSv1_1_method();
+            printf_verbose("tls_version = TLSv1_1");
+            tls_version = TLSv1_1;
         }
         else if( options->sslVersion == tls_v12) {
-            printf_verbose("sslMethod = TLSv1_2_method()");
-            sslMethod = TLSv1_2_method();
+            printf_verbose("tls_version = TLSv1_2");
+            tls_version = TLSv1_2;
         }
         else if( options->sslVersion == tls_v13) {
-            printf_verbose("sslMethod = TLSv1_3_method()");
-            sslMethod = TLSv1_3_method();
+            printf_verbose("tls_version = TLSv1_3");
+            tls_version = TLSv1_3;
         }
         else {
-            printf_verbose("sslMethod = TLS_method()\n");
-            sslMethod = TLS_method();
+            printf_verbose("tls_version = TLS_ALL_VERSIONS\n");
+            tls_version = TLS_ALL_VERSIONS;
         }
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
             if (SSL_CTX_set_cipher_list(options->ctx, CIPHERSUITE_LIST_ALL) != 0)
@@ -3155,7 +3182,7 @@ int showTrustedCAs(struct sslCheckOptions *options)
     BIO *cipherConnectionBio = NULL;
     BIO *stdoutBIO = NULL;
     BIO *fileBIO = NULL;
-    const SSL_METHOD *sslMethod = NULL;
+    unsigned int tls_version = TLS_ALL_VERSIONS;
     char buffer[1024];
     int tempInt = 0;
     STACK_OF(X509_NAME) *sk2;
@@ -3168,26 +3195,26 @@ int showTrustedCAs(struct sslCheckOptions *options)
 
         // Setup Context Object...
         if( options->sslVersion == ssl_v2 || options->sslVersion == ssl_v3) {
-            printf_verbose("sslMethod = SSLv23_method()");
-            sslMethod = SSLv23_method();
+            printf_verbose("tls_version = TLS_ALL_VERSIONS (ssl_v2/ssl_v3)");
+            tls_version = TLS_ALL_VERSIONS;
         }
         else if( options->sslVersion == tls_v11) {
-            printf_verbose("sslMethod = TLSv1_1_method()");
-            sslMethod = TLSv1_1_method();
+            printf_verbose("tls_version = TLSv1_1");
+            tls_version = TLSv1_1;
         }
         else if( options->sslVersion == tls_v12) {
-            printf_verbose("sslMethod = TLSv1_2_method()");
-            sslMethod = TLSv1_2_method();
+            printf_verbose("tls_version = TLSv1_2");
+            tls_version = TLSv1_2;
         }
         else if( options->sslVersion == tls_v13) {
-            printf_verbose("sslMethod = TLSv1_3_method()");
-            sslMethod = TLSv1_3_method();
+            printf_verbose("tls_version = TLSv1_3");
+            tls_version = TLSv1_3;
         }
         else {
-            printf_verbose("sslMethod = TLS_method()\n");
-            sslMethod = TLS_method();
+            printf_verbose("tls_version = TLS_ALL_VERSIONS\n");
+            tls_version = TLS_ALL_VERSIONS;
         }
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
             if (SSL_CTX_set_cipher_list(options->ctx, CIPHERSUITE_LIST_ALL) != 0)
@@ -3374,12 +3401,12 @@ int testConnection(struct sslCheckOptions *options)
     return false;
 }
 
-int testProtocolCiphers(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
+int testProtocolCiphers(struct sslCheckOptions *options, unsigned int tls_version)
 {
     int status;
     status = true;
 
-    if (sslMethod == TLSv1_3_client_method())
+    if (tls_version == TLSv1_3)
       strncpy(options->cipherstring, TLSV13_CIPHERSUITES, sizeof(options->cipherstring));
     else
       strncpy(options->cipherstring, CIPHERSUITE_LIST_ALL, sizeof(options->cipherstring));
@@ -3388,7 +3415,7 @@ int testProtocolCiphers(struct sslCheckOptions *options, const SSL_METHOD *sslMe
     while (status == true)
     {
         // Setup Context Object...
-        options->ctx = new_CTX(sslMethod);
+        options->ctx = new_versioned_CTX(tls_version);
         if (options->ctx != NULL)
         {
             // SSL implementation bugs/workaround
@@ -3397,17 +3424,13 @@ int testProtocolCiphers(struct sslCheckOptions *options, const SSL_METHOD *sslMe
             else
                 SSL_CTX_set_options(options->ctx, 0);
 
-            // minimal protocol version 
-            if (sslMethod == TLSv1_3_client_method())
-                SSL_CTX_set_min_proto_version(options->ctx, TLS1_3_VERSION);
-
             // Load Certs if required...
             if ((options->clientCertsFile != 0) || (options->privateKeyFile != 0))
                 status = loadCerts(options);
 
             // Test the cipher
             if (status == true)
-                status = testCipher(options, sslMethod);
+                status = testCipher(options, tls_version);
 
             // Free CTX Object
             FREE_CTX(options->ctx);
@@ -3422,13 +3445,7 @@ int testProtocolCiphers(struct sslCheckOptions *options, const SSL_METHOD *sslMe
     }
 
     /* Test the missing ciphersuites. */
-    if (sslMethod != TLSv1_3_client_method()) {
-      int tls_version = TLSv1_0;
-      if (sslMethod == TLSv1_1_client_method())
-	tls_version = TLSv1_1;
-      else if (sslMethod == TLSv1_2_client_method())
-	tls_version = TLSv1_2;
-
+    if (tls_version != TLSv1_3) {
       testMissingCiphers(options, tls_version);
     }
     return true;
@@ -3526,22 +3543,22 @@ int testHost(struct sslCheckOptions *options)
         {
             case ssl_all:
             case tls_all:
-                populateCipherList(options, TLSv1_3_client_method());
-                populateCipherList(options, TLSv1_2_client_method());
-                populateCipherList(options, TLSv1_1_client_method());
-                populateCipherList(options, TLSv1_client_method());
+                populateCipherList(options, TLSv1_3);
+                populateCipherList(options, TLSv1_2);
+                populateCipherList(options, TLSv1_1);
+                populateCipherList(options, TLSv1_0);
                 break;
             case tls_v13:
-                populateCipherList(options, TLSv1_3_client_method());
+                populateCipherList(options, TLSv1_3);
                 break;
             case tls_v12:
-                populateCipherList(options, TLSv1_2_client_method());
+                populateCipherList(options, TLSv1_2);
                 break;
             case tls_v11:
-                populateCipherList(options, TLSv1_1_client_method());
+                populateCipherList(options, TLSv1_1);
                 break;
             case tls_v10:
-                populateCipherList(options, TLSv1_client_method());
+                populateCipherList(options, TLSv1_0);
                 break;
         }
         printf("\n  %sOpenSSL-Supported Client Cipher(s):%s\n", COL_BLUE, RESET);
@@ -3563,18 +3580,18 @@ int testHost(struct sslCheckOptions *options)
     if (status == true && options->fallback )
     {
         printf("  %sTLS Fallback SCSV:%s\n", COL_BLUE, RESET);
-        testFallback(options, NULL);
+        testFallback(options, TLS_ALL_VERSIONS);
     }
     if (status == true && options->reneg )
     {
         printf("  %sTLS renegotiation:%s\n", COL_BLUE, RESET);
-        testRenegotiation(options, TLSv1_client_method());
+        testRenegotiation(options, TLSv1_0);
     }
 
     if (status == true && options->compression )
     {
         printf("  %sTLS Compression:%s\n", COL_BLUE, RESET);
-        testCompression(options, TLSv1_client_method());
+        testCompression(options, TLSv1_0);
     }
 
     if (status == true && options->heartbleed )
@@ -3583,22 +3600,22 @@ int testHost(struct sslCheckOptions *options)
         if ((options->sslVersion == ssl_all || options->sslVersion == tls_all || options->sslVersion == tls_v13) && options->tls13_supported)
         {
             printf("TLSv1.3 ");
-            status = testHeartbleed(options, TLSv1_3_client_method());
+            status = testHeartbleed(options, TLSv1_3);
         }
         if ((options->sslVersion == ssl_all || options->sslVersion == tls_all || options->sslVersion == tls_v12) && options->tls12_supported)
         {
             printf("TLSv1.2 ");
-            status = testHeartbleed(options, TLSv1_2_client_method());
+            status = testHeartbleed(options, TLSv1_2);
         }
         if ((options->sslVersion == ssl_all || options->sslVersion == tls_all || options->sslVersion == tls_v11) && options->tls11_supported)
         {
             printf("TLSv1.1 ");
-            status = testHeartbleed(options, TLSv1_1_client_method());
+            status = testHeartbleed(options, TLSv1_1);
         }
         if ((options->sslVersion == ssl_all || options->sslVersion == tls_all || options->sslVersion == tls_v10) && options->tls10_supported)
         {
             printf("TLSv1.0 ");
-            status = testHeartbleed(options, TLSv1_client_method());
+            status = testHeartbleed(options, TLSv1_0);
         }
         if( options->sslVersion == ssl_v2 || options->sslVersion == ssl_v3)
         {
@@ -3623,29 +3640,29 @@ int testHost(struct sslCheckOptions *options)
             case ssl_all:
             case tls_all:
                 if ((status != false) && options->tls13_supported)
-                    status = testProtocolCiphers(options, TLSv1_3_client_method());
+                    status = testProtocolCiphers(options, TLSv1_3);
                 if ((status != false) && options->tls12_supported)
-                    status = testProtocolCiphers(options, TLSv1_2_client_method());
+                    status = testProtocolCiphers(options, TLSv1_2);
                 if ((status != false) && options->tls11_supported)
-                    status = testProtocolCiphers(options, TLSv1_1_client_method());
+                    status = testProtocolCiphers(options, TLSv1_1);
                 if ((status != false) && options->tls10_supported)
-                    status = testProtocolCiphers(options, TLSv1_client_method());
+                    status = testProtocolCiphers(options, TLSv1_0);
                 break;
             case tls_v10:
                 if ((status != false) && options->tls10_supported)
-                    status = testProtocolCiphers(options, TLSv1_client_method());
+                    status = testProtocolCiphers(options, TLSv1_0);
                 break;
             case tls_v11:
                 if ((status != false) && options->tls11_supported)
-                    status = testProtocolCiphers(options, TLSv1_1_client_method());
+                    status = testProtocolCiphers(options, TLSv1_1);
                 break;
             case tls_v12:
                 if ((status != false) && options->tls12_supported)
-                    status = testProtocolCiphers(options, TLSv1_2_client_method());
+                    status = testProtocolCiphers(options, TLSv1_2);
                 break;
             case tls_v13:
                 if ((status != false) && options->tls13_supported)
-                    status = testProtocolCiphers(options, TLSv1_3_client_method());
+                    status = testProtocolCiphers(options, TLSv1_3);
                 break;
         }
     }
@@ -3673,13 +3690,13 @@ int testHost(struct sslCheckOptions *options)
         if (status == true && options->checkCertificate == true)
         {
             if (status != false)
-                status = checkCertificateProtocol(options, TLSv1_3_client_method());
+                status = checkCertificateProtocol(options, TLSv1_3);
             if (status != false)
-                status = checkCertificateProtocol(options, TLSv1_2_client_method());
+                status = checkCertificateProtocol(options, TLSv1_2);
             if (status != false)
-                status = checkCertificateProtocol(options, TLSv1_1_client_method());
+                status = checkCertificateProtocol(options, TLSv1_1);
             if (status != false)
-                status = checkCertificateProtocol(options, TLSv1_client_method());
+                status = checkCertificateProtocol(options, TLSv1_0);
             if (status != false)
                 printf("Certificate information cannot be retrieved.\n\n");
         }
@@ -4573,13 +4590,13 @@ void findMissingCiphers() {
   const SSL_CIPHER *cipher = NULL;
   unsigned int tls_version = 0;
   uint32_t id = 0;
-  const SSL_METHOD *sslMethods[] = { TLSv1_client_method(), TLSv1_1_client_method(), TLSv1_2_client_method() };
   unsigned int tls_versions[] = { V1_0, V1_1, V1_2 };
+  unsigned int method_versions[] = { TLSv1_0, TLSv1_1, TLSv1_2 };
 
   /* For each TLS version (not including v1.3)... */
-  for (int m = 0; m < (sizeof(sslMethods) / sizeof(const SSL_METHOD *)); m++) {
+  for (int m = 0; m < (sizeof(tls_versions) / sizeof(unsigned int)); m++) {
     tls_version = tls_versions[m];
-    SSL_CTX *ctx = new_CTX(sslMethods[m]);
+    SSL_CTX *ctx = new_versioned_CTX(method_versions[m]);
     SSL_CTX_set_cipher_list(ctx, CIPHERSUITE_LIST_ALL);
     cipherList = SSL_CTX_get_ciphers(ctx);
 
@@ -5028,28 +5045,12 @@ unsigned int checkIfTLSVersionIsSupported(struct sslCheckOptions *options, unsig
 unsigned int checkIfTLSVersionIsSupported_Backup(struct sslCheckOptions *options, unsigned int tls_version) {
 
   int ret = false;
-  int version = -1;
-  const SSL_METHOD *sslMethod = NULL;
 
-  /* Determine the right client method, ciphersuite list, and TLS version we need to work with. */
+  /* Determine the right ciphersuite list and TLS version we need to work with. */
   strncpy(options->cipherstring, CIPHERSUITE_LIST_ALL, sizeof(options->cipherstring) - 1);
-  if (tls_version == TLSv1_0) {
-    sslMethod = TLSv1_client_method();
-    version = TLS1_VERSION;
-  } else if (tls_version == TLSv1_1) {
-    sslMethod = TLSv1_1_client_method();
-    version = TLS1_1_VERSION;
-  } else if (tls_version == TLSv1_2) {
-    sslMethod = TLSv1_2_client_method();
-    version = TLS1_2_VERSION;
-  } else if (tls_version == TLSv1_3) {
-    sslMethod = TLSv1_3_client_method();
-    version = TLS1_3_VERSION;
+  if (tls_version == TLSv1_3) {
     strncpy(options->cipherstring, TLSV13_CIPHERSUITES, sizeof(options->cipherstring) - 1);
   }
-
-  if (sslMethod == NULL)
-    goto done;
 
   printf_verbose("Using fallback method for checking if %s is supported.\n", getPrintableTLSName(tls_version));
 
@@ -5061,25 +5062,14 @@ unsigned int checkIfTLSVersionIsSupported_Backup(struct sslCheckOptions *options
   }
 
   /* Create a new context. */
-  options->ctx = new_CTX(sslMethod);
+  options->ctx = new_versioned_CTX(tls_version);
   if (options->ctx == NULL) {
     printf_verbose("%s: failed to create context.\n", __func__);
     goto done;
   }
 
-  /* Set the minimum and maximum protocol versions to the same thing.  This ensures that if we connect, we're only connected with this exact TLS version. */
-  if (!SSL_CTX_set_min_proto_version(options->ctx, version)) {
-    printf_verbose("%s: failed to set minimum protocol version.\n", __func__);
-    goto done;
-  }
-
-  if (!SSL_CTX_set_max_proto_version(options->ctx, version)) {
-    printf_verbose("%s: failed to set maximum protocol version.\n", __func__);
-    goto done;
-  }
-
   /* Set the ciphersuite string in the context. */
-  if (!setCipherSuite(options, sslMethod, options->cipherstring)) {
+  if (!setCipherSuite(options, tls_version, options->cipherstring)) {
     printf_verbose("%s: failed to set the ciphersuite list: [%s]\n", __func__, options->cipherstring);
     goto done;
   }
