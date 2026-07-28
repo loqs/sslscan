@@ -2832,7 +2832,7 @@ int showCertificate(struct sslCheckOptions *options)
                                         if (BIO_write(bp,"    Serial Number:",18) <= 0)
                                             return(1);
 
-                                        if (bs->length <= 4)
+                                        if (ASN1_STRING_length(bs) <= 4)
                                         {
                                             l=ASN1_INTEGER_get(bs);
                                             if (l < 0)
@@ -2850,7 +2850,9 @@ int showCertificate(struct sslCheckOptions *options)
                                         }
                                         else
                                         {
-                                            neg=(bs->type == V_ASN1_NEG_INTEGER)?" (Negative)":"";
+                                            const unsigned char *bs_data = ASN1_STRING_get0_data(bs);
+                                            int bs_len = ASN1_STRING_length(bs);
+                                            neg=(ASN1_STRING_type(bs) == V_ASN1_NEG_INTEGER)?" (Negative)":"";
                                             if (BIO_printf(bp,"%1s%s","",neg) <= 0)
                                                 return(1);
 
@@ -2858,20 +2860,20 @@ int showCertificate(struct sslCheckOptions *options)
                                                 if (BIO_printf(xml_bp,"   <serial>") <= 0)
                                                     return(1);
 
-                                            for (i=0; i<bs->length; i++)
+                                            for (i=0; i<bs_len; i++)
                                             {
-                                                if (BIO_printf(bp,"%02x%c",bs->data[i],
-                                                               ((i+1 == bs->length)?'\n':':')) <= 0)
+                                                if (BIO_printf(bp,"%02x%c",bs_data[i],
+                                                               ((i+1 == bs_len)?'\n':':')) <= 0)
                                                     return(1);
                                                 if (options->xmlOutput) {
-                                                    if (i+1 == bs->length)
+                                                    if (i+1 == bs_len)
                                                     {
-                                                        if (BIO_printf(xml_bp,"%02x",bs->data[i]) <= 0)
+                                                        if (BIO_printf(xml_bp,"%02x",bs_data[i]) <= 0)
                                                             return(1);
                                                     }
                                                     else
                                                     {
-                                                        if (BIO_printf(xml_bp,"%02x%c",bs->data[i], ':') <= 0)
+                                                        if (BIO_printf(xml_bp,"%02x%c",bs_data[i], ':') <= 0)
                                                             return(1);
                                                     }
                                                 }
