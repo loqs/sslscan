@@ -1944,7 +1944,11 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
     X509 *x509Cert = NULL;
     EVP_PKEY *publicKey = NULL;
     char certAlgorithm[80];
+#if OPENSSL_VERSION_NUMBER < 0x40000000L
     X509_EXTENSION *extension = NULL;
+#else
+    const X509_EXTENSION *extension = NULL;
+#endif
     const X509_ALGOR *palg = NULL;
     const ASN1_OBJECT *paobj = NULL;
 
@@ -2139,9 +2143,9 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                             if (!(X509_FLAG_COMPAT & X509_FLAG_NO_ISSUER))
                             {
                                 int cnindex;
-                                X509_NAME *subj;
-                                X509_NAME_ENTRY *e;
-                                ASN1_STRING *d;
+                                const X509_NAME *subj;
+                                const X509_NAME_ENTRY *e;
+                                const ASN1_STRING *d;
                                 const char *subject;
                                 const char *issuer;
 
@@ -2674,7 +2678,7 @@ int showCertificate(struct sslCheckOptions *options)
     X509 *x509Cert = NULL;
     EVP_PKEY *publicKey = NULL;
     const SSL_METHOD *sslMethod = NULL;
-    ASN1_OBJECT *asn1Object = NULL;
+    const ASN1_OBJECT *asn1Object = NULL;
     X509_EXTENSION *extension = NULL;
     char buffer[1024];
     long tempLong = 0;
