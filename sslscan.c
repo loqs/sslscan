@@ -2650,16 +2650,23 @@ static int ocsp_resp_cb(SSL *s, void *unused) {
 
 int ocsp_certid_print(BIO *bp, OCSP_CERTID *a, int indent)
 {
+    ASN1_OCTET_STRING *nameHash = NULL, *keyHash = NULL;
+    ASN1_INTEGER *serial = NULL;
+    ASN1_OBJECT *md = NULL;
+
+    if (!OCSP_id_get0_info(&nameHash, &md, &keyHash, &serial, a))
+        return 0;
+
     BIO_printf(bp, "%*sCertificate ID:\n", indent, "");
     indent += 2;
     BIO_printf(bp, "%*sHash Algorithm: ", indent, "");
-    i2a_ASN1_OBJECT(bp, a->hashAlgorithm.algorithm);
+    i2a_ASN1_OBJECT(bp, md);
     BIO_printf(bp, "\n%*sIssuer Name Hash: ", indent, "");
-    i2a_ASN1_STRING(bp, &a->issuerNameHash, 0);
+    i2a_ASN1_STRING(bp, nameHash, 0);
     BIO_printf(bp, "\n%*sIssuer Key Hash: ", indent, "");
-    i2a_ASN1_STRING(bp, &a->issuerKeyHash, 0);
+    i2a_ASN1_STRING(bp, keyHash, 0);
     BIO_printf(bp, "\n%*sSerial Number: ", indent, "");
-    i2a_ASN1_INTEGER(bp, &a->serialNumber);
+    i2a_ASN1_INTEGER(bp, serial);
     BIO_printf(bp, "\n");
     return 1;
 }

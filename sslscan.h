@@ -276,13 +276,6 @@ struct ocsp_revoked_info_st {
     ASN1_ENUMERATED *revocationReason;
 };
 
-struct ocsp_cert_id_st {
-    X509_ALGOR hashAlgorithm;
-    ASN1_OCTET_STRING issuerNameHash;
-    ASN1_OCTET_STRING issuerKeyHash;
-    ASN1_INTEGER serialNumber;
-};
-
 #define BS_DEFAULT_NEW_SIZE 256 /* The starting size of the buffer when bs_new() is used. */
 struct _bs {
   unsigned char *buf;
